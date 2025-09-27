@@ -1,0 +1,8 @@
+namelist:
+- 学生1
+- 学生2
+- 学生3
+- 学生4
+points:
+  _3_days: 1
+  _7_days: 3
