@@ -1,11 +1,12 @@
 import tkinter as tk
 import tkinter.messagebox as ms
-import os, yaml, json
+import subprocess, yaml, json
 from pathlib import Path
 from datetime import datetime, timedelta
 
+font_chinese = ('Microsoft YaHei', 10)
 class ContinuousScoring:
-    #"""连续考勤评分系统，替代生成器的可序列化类"""
+    """连续考勤评分系统，替代生成器的可序列化类"""
     
     def __init__(self, max_days=7):
         self.scoring = [0]  # 连续出勤天数记录
@@ -14,7 +15,7 @@ class ContinuousScoring:
         self.current_day = 0
     
     def record_attendance(self, today_arrived):
-        #"""记录当天考勤"""
+        """记录当天考勤"""
         if today_arrived:
             self.scoring[-1] += 1
         else:
@@ -28,7 +29,7 @@ class ContinuousScoring:
             self.history = self.history[-self.max_days*2:]
     
     def calculate_scores(self):
-        #"""计算3天和7天连续出勤分数"""
+        """计算3天和7天连续出勤分数"""
         # 使用最近max_days天的记录进行计算
         recent_history = self.history[-self.max_days:] if len(self.history) >= self.max_days else self.history
         
@@ -47,21 +48,21 @@ class ContinuousScoring:
         return _3_day, _7_day
     
     def get_current_streak(self):
-        #"""获取当前连续出勤天数"""
+        """获取当前连续出勤天数"""
         return self.scoring[-1] if self.scoring else 0
     
     def get_total_attendance(self):
-        #"""获取总出勤天数"""
+        """获取总出勤天数"""
         return sum(self.history)
     
     def get_attendance_rate(self):
-        #"""获取出勤率"""
+        """获取出勤率"""
         if len(self.history) == 0:
             return 0
         return sum(self.history) / len(self.history)
     
     def to_dict(self):
-        #"""转换为可序列化的字典"""
+        """转换为可序列化的字典"""
         return {
             'scoring': self.scoring,
             'history': self.history,
@@ -71,7 +72,7 @@ class ContinuousScoring:
     
     @classmethod
     def from_dict(cls, data):
-        #"""从字典恢复对象"""
+        """从字典恢复对象"""
         obj = cls(data.get('max_days', 7))
         obj.scoring = data.get('scoring', [0])
         obj.history = data.get('history', [])
@@ -79,7 +80,7 @@ class ContinuousScoring:
         return obj
 
 class AttendanceSystem:
-    #"""考勤系统主类"""
+    """考勤系统主类"""
     
     def __init__(self):
         self.cwd = Path.cwd()
@@ -87,7 +88,7 @@ class AttendanceSystem:
         self.setting = self.load_settings()
     
     def setup_directories(self):
-        #"""创建必要的目录"""
+        """创建必要的目录"""
         if not (self.cwd/'eggs').exists():
             (self.cwd/'eggs').mkdir()
         if not (self.cwd/'bacon').exists():
@@ -96,29 +97,43 @@ class AttendanceSystem:
             (self.cwd/'reports').mkdir()
     
     def load_settings(self):
-        #"""加载或创建设置文件"""
+        """加载或创建设置文件"""
         settings_file = self.cwd/'bacon/Setting.yml'
-        
+    
         if not settings_file.exists():
-            # 创建默认设置
+        # 创建默认设置
             default_settings = {
-                'points': {
-                    '_3_days': 1,
-                    '_7_days': 3
-                },
-                'namelist': ['学生1', '学生2', '学生3', '学生4']
+            'points': {
+                '_3_days': 1,
+                '_7_days': 3
+            },
+            'namelist': ['学生1', '学生2', '学生3', '学生4', '学生5', '学生6', '学生7', 
+                       '学生8', '学生9', '学生10', '学生11', '学生12', '学生13', '学生14'],
+            'display': {
+                'columns_per_row': 7  # 每行显示的复选框数量
             }
-            
+            }
+            # 将默认设置写入文件
             with open(settings_file, 'w', encoding='utf-8') as fp:
                 yaml.dump(default_settings, fp, allow_unicode=True)
-            
             return default_settings
         else:
-            with open(settings_file, 'r', encoding='utf-8') as fp:
+            # 尝试不同的编码读取文件
+            encodings = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']
+        
+            for encoding in encodings:
+                try:
+                    with open(settings_file, 'r', encoding=encoding) as fp:
+                        return yaml.safe_load(fp)
+                except (UnicodeDecodeError, yaml.YAMLError):
+                    continue
+        
+        # 如果所有编码都失败，使用错误处理方式读取
+            with open(settings_file, 'r', encoding='utf-8', errors='replace') as fp:
                 return yaml.safe_load(fp)
     
     def load_student_data(self, session):
-        #"""加载学生数据"""
+        """加载学生数据"""
         data_file = self.cwd/f'eggs/{session}_data.json'
         
         if data_file.exists():
@@ -141,7 +156,7 @@ class AttendanceSystem:
             return students
     
     def save_student_data(self, session, students):
-        #"""保存学生数据"""
+        """保存学生数据"""
         data_file = self.cwd/f'eggs/{session}_data.json'
         
         # 转换为可序列化的字典
@@ -153,7 +168,7 @@ class AttendanceSystem:
             json.dump(data, f, ensure_ascii=False, indent=2)
     
     def record_attendance(self, session, present_students):
-        #"""记录考勤"""
+        """记录考勤"""
         students = self.load_student_data(session)
         
         # 更新每个学生的考勤记录
@@ -172,7 +187,7 @@ class AttendanceSystem:
         return scores
     
     def generate_summary_report(self):
-        #"""生成汇总报告并保存为Markdown文件"""
+        """生成汇总报告并保存为Markdown文件"""
         # 加载上午和下午的数据
         morning_students = self.load_student_data("morning")
         afternoon_students = self.load_student_data("afternoon")
@@ -279,11 +294,11 @@ class AttendanceGUI:
         
         tk.Label(self.win, text='请选择一个操作', font=('Arial', 12)).pack(pady=10)
         tk.Button(self.win, text='上午考勤', command=self.append_morning, 
-                 width=15, height=2).pack(pady=5)
+                 width=15, height=2, font=font_chinese).pack(pady=5)
         tk.Button(self.win, text='下午考勤', command=self.append_afternoon,
-                 width=15, height=2).pack(pady=5)
+                 width=15, height=2, font=font_chinese).pack(pady=5)
         tk.Button(self.win, text='生成汇总报告', command=self.generate_summary,
-                 width=15, height=2, bg='lightblue').pack(pady=5)
+                 width=15, height=2, bg='lightblue', font=font_chinese).pack(pady=5)
         tk.Label(self.win, text='点击按钮记录考勤', font=('Arial', 10)).pack(pady=10)
     
     def append_morning(self):
@@ -299,6 +314,8 @@ class AttendanceGUI:
         try:
             report_file = self.system.generate_summary_report()
             ms.showinfo("报告生成成功", f"汇总报告已生成:\n{report_file}")
+            process = subprocess.Popen(['start',report_file],shell=True)
+            process.wait()
         except Exception as e:
             ms.showerror("错误", f"生成报告时出错:\n{str(e)}")
     
@@ -307,18 +324,38 @@ class AttendanceGUI:
         # 创建考勤窗口
         attendance_win = tk.Toplevel(self.win)
         attendance_win.title(f"{session_name}考勤")
-        attendance_win.geometry("250x300")
         
-        # 获取学生列表
+        # 获取学生列表和显示设置
         students = self.system.setting['namelist']
+        columns_per_row = self.system.setting.get('display', {}).get('columns_per_row', 7)
+        
+        # 创建主框架
+        main_frame = tk.Frame(attendance_win)
+        main_frame.pack(padx=10, pady=10, fill='both', expand=True)
+        
+        # 标题
+        tk.Label(main_frame, text=f"请{session_name}早到的同学自己上来打勾:", 
+                font=('Arial', 15, 'bold')).pack(pady=(0, 10))
+        
+        # 创建复选框容器
+        checkboxes_frame = tk.Frame(main_frame)
+        checkboxes_frame.pack(fill='both', expand=True)
+        
         vars = {}
+        checkbuttons = []
         
-        # 创建复选框
-        tk.Label(attendance_win, text=f"请选择{session_name}出勤的学生:").pack(pady=10)
-        
-        for name in students:
+        # 创建复选框，按指定列数排列
+        for i, name in enumerate(students):
+            row = i // columns_per_row
+            col = i % columns_per_row
+            
             vars[name] = tk.BooleanVar()
-            tk.Checkbutton(attendance_win, text=name, variable=vars[name]).pack(anchor='w', padx=20)
+            cb = tk.Checkbutton(checkboxes_frame, text=name, variable=vars[name], font=font_chinese)
+            cb.grid(row=row, column=col, sticky='w', padx=5, pady=2)
+            checkbuttons.append(cb)
+        
+        button_frame = tk.Frame(main_frame)
+        button_frame.pack(pady=10)
         
         def submit():
             # 获取选中的学生
@@ -347,7 +384,12 @@ class AttendanceGUI:
             ms.showinfo("考勤结果", result_text)
             attendance_win.destroy()
         
-        tk.Button(attendance_win, text="提交", command=submit).pack(pady=10)
+        tk.Button(main_frame, text="提交", command=submit, 
+                 bg='lightgreen', width=15).pack(pady=10)
+        
+        # 自动调整窗口大小
+        attendance_win.update()
+        attendance_win.minsize(attendance_win.winfo_width(), attendance_win.winfo_height())
     
     def run(self):
         """运行应用程序"""
