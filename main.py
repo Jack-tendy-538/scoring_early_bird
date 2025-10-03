@@ -5,6 +5,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 
 font_chinese = ('Microsoft YaHei', 10)
+
 class ContinuousScoring:
     """连续考勤评分系统，替代生成器的可序列化类"""
     
@@ -60,6 +61,12 @@ class ContinuousScoring:
         if len(self.history) == 0:
             return 0
         return sum(self.history) / len(self.history)
+    
+    def reset_data(self):
+        """重置数据，开始新的一周"""
+        self.scoring = [0]
+        self.history = []
+        self.current_day = 0
     
     def to_dict(self):
         """转换为可序列化的字典"""
@@ -186,8 +193,17 @@ class AttendanceSystem:
         
         return scores
     
+    def reset_all_data(self):
+        """重置所有学生的数据，开始新的一周"""
+        sessions = ["morning", "afternoon"]
+        for session in sessions:
+            students = self.load_student_data(session)
+            for student in students.values():
+                student.reset_data()
+            self.save_student_data(session, students)
+    
     def generate_summary_report(self):
-        """生成汇总报告并保存为Markdown文件"""
+        """生成汇总报告并保存为Markdown文件，只显示最终分数"""
         # 加载上午和下午的数据
         morning_students = self.load_student_data("morning")
         afternoon_students = self.load_student_data("afternoon")
@@ -197,27 +213,14 @@ class AttendanceSystem:
         
         # 准备报告数据
         report_data = []
-        total_days = max(
-            max(len(student.history) for student in morning_students.values()) if morning_students else 0,
-            max(len(student.history) for student in afternoon_students.values()) if afternoon_students else 0
-        )
         
         for name in students:
             morning_student = morning_students.get(name, ContinuousScoring())
             afternoon_student = afternoon_students.get(name, ContinuousScoring())
             
-            # 计算各项指标
+            # 计算各项指标 - 只计算最终分数
             morning_3day, morning_7day = morning_student.calculate_scores()
             afternoon_3day, afternoon_7day = afternoon_student.calculate_scores()
-            
-            morning_total = morning_student.get_total_attendance()
-            afternoon_total = afternoon_student.get_total_attendance()
-            
-            morning_rate = morning_student.get_attendance_rate() * 100
-            afternoon_rate = afternoon_student.get_attendance_rate() * 100
-            
-            morning_streak = morning_student.get_current_streak()
-            afternoon_streak = afternoon_student.get_current_streak()
             
             # 计算总分
             total_score = (morning_3day + afternoon_3day) * self.setting['points']['_3_days'] + \
@@ -225,37 +228,27 @@ class AttendanceSystem:
             
             report_data.append({
                 'name': name,
-                'morning_total': morning_total,
-                'morning_rate': f"{morning_rate:.1f}%",
-                'morning_streak': morning_streak,
-                'morning_3day': morning_3day,
-                'morning_7day': morning_7day,
-                'afternoon_total': afternoon_total,
-                'afternoon_rate': f"{afternoon_rate:.1f}%",
-                'afternoon_streak': afternoon_streak,
-                'afternoon_3day': afternoon_3day,
-                'afternoon_7day': afternoon_7day,
                 'total_score': total_score
             })
         
         # 按总分排序
         report_data.sort(key=lambda x: x['total_score'], reverse=True)
         
-        # 生成Markdown表格
+        # 生成简化的Markdown表格 - 只显示姓名和总分
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         md_content = f"""# 考勤汇总报告
 
 **生成时间**: {timestamp}  
-**统计天数**: {total_days}天
+**本周结束，开始新的一周**
 
-## 考勤统计表
+## 本周最终分数统计
 
-| 排名 | 姓名 | 上午出勤 | 上午出勤率 | 上午连续 | 上午3天分 | 上午7天分 | 下午出勤 | 下午出勤率 | 下午连续 | 下午3天分 | 下午7天分 | 总分 |
-|------|------|----------|------------|----------|-----------|-----------|----------|------------|----------|-----------|-----------|------|
+| 排名 | 姓名 | 总分 |
+|------|------|------|
 """
         
         for i, data in enumerate(report_data, 1):
-            md_content += f"| {i} | {data['name']} | {data['morning_total']} | {data['morning_rate']} | {data['morning_streak']} | {data['morning_3day']} | {data['morning_7day']} | {data['afternoon_total']} | {data['afternoon_rate']} | {data['afternoon_streak']} | {data['afternoon_3day']} | {data['afternoon_7day']} | **{data['total_score']}** |\n"
+            md_content += f"| {i} | {data['name']} | **{data['total_score']}** |\n"
         
         # 添加分数说明
         md_content += f"""
@@ -265,17 +258,18 @@ class AttendanceSystem:
 - 连续出勤3天及以上但不足7天: {self.setting['points']['_3_days']}分/次
 - 连续出勤7天: {self.setting['points']['_7_days']}分/次
 
-## 统计说明
+## 注意
 
-- 出勤率 = 出勤次数 / 总考勤次数
-- 连续出勤天数 = 当前连续出勤天数
-- 总分 = (上午3天分 + 下午3天分) × {self.setting['points']['_3_days']} + (上午7天分 + 下午7天分) × {self.setting['points']['_7_days']}
+本周考勤数据已重置，下周将重新开始统计。
 """
         
         # 保存Markdown文件
         report_file = self.cwd / 'reports' / f'考勤汇总_{datetime.now().strftime("%Y%m%d_%H%M%S")}.md'
         with open(report_file, 'w', encoding='utf-8') as f:
             f.write(md_content)
+        
+        # 重置所有数据，开始新的一周
+        self.reset_all_data()
         
         return report_file
 
@@ -292,14 +286,14 @@ class AttendanceGUI:
         self.win.title("考勤系统")
         self.win.geometry("300x250")
         
-        tk.Label(self.win, text='请选择一个操作', font=('Arial', 12)).pack(pady=10)
+        tk.Label(self.win, text='请选择一个操作', font=font_chinese).pack(pady=10)
         tk.Button(self.win, text='上午考勤', command=self.append_morning, 
                  width=15, height=2, font=font_chinese).pack(pady=5)
         tk.Button(self.win, text='下午考勤', command=self.append_afternoon,
                  width=15, height=2, font=font_chinese).pack(pady=5)
         tk.Button(self.win, text='生成汇总报告', command=self.generate_summary,
                  width=15, height=2, bg='lightblue', font=font_chinese).pack(pady=5)
-        tk.Label(self.win, text='点击按钮记录考勤', font=('Arial', 10)).pack(pady=10)
+        tk.Label(self.win, text='点击按钮记录考勤', font=font_chinese).pack(pady=10)
     
     def append_morning(self):
         """上午考勤"""
@@ -312,10 +306,16 @@ class AttendanceGUI:
     def generate_summary(self):
         """生成汇总报告"""
         try:
+            result = ms.askyesno("确认", "生成报告后将重置本周数据并开始新的一周，是否继续?")
+            if not result:
+                return
             report_file = self.system.generate_summary_report()
-            ms.showinfo("报告生成成功", f"汇总报告已生成:\n{report_file}")
-            process = subprocess.Popen(['start',report_file],shell=True)
-            process.wait()
+            ms.showinfo("报告生成成功", f"汇总报告已生成:\n{report_file}\n\n本周数据已重置，下周将重新开始统计。")
+            # 尝试打开报告文件
+            try:
+                subprocess.Popen(['start', '', str(report_file)], shell=True)
+            except:
+                pass  # 如果打开失败，忽略错误
         except Exception as e:
             ms.showerror("错误", f"生成报告时出错:\n{str(e)}")
     
@@ -335,7 +335,7 @@ class AttendanceGUI:
         
         # 标题
         tk.Label(main_frame, text=f"请{session_name}早到的同学自己上来打勾:", 
-                font=('Arial', 15, 'bold')).pack(pady=(0, 10))
+                font=font_chinese).pack(pady=(0, 10))
         
         # 创建复选框容器
         checkboxes_frame = tk.Frame(main_frame)
@@ -385,7 +385,7 @@ class AttendanceGUI:
             attendance_win.destroy()
         
         tk.Button(main_frame, text="提交", command=submit, 
-                 bg='lightgreen', width=15).pack(pady=10)
+                 bg='lightgreen', width=15, font=font_chinese).pack(pady=10)
         
         # 自动调整窗口大小
         attendance_win.update()
