@@ -1,6 +1,8 @@
 import tkinter as tk
 import tkinter.messagebox as ms
 import subprocess, yaml, json
+import threading
+import time
 from pathlib import Path
 from datetime import datetime, timedelta
 
@@ -280,6 +282,7 @@ class AttendanceGUI:
         self.system = AttendanceSystem()
         self.win = tk.Tk()
         self.setup_ui()
+        self.attendance_windows = {}  # 存储考勤窗口的引用
     
     def setup_ui(self):
         """设置用户界面"""
@@ -319,11 +322,100 @@ class AttendanceGUI:
         except Exception as e:
             ms.showerror("错误", f"生成报告时出错:\n{str(e)}")
     
+    def submit_attendance(self, session, session_name, attendance_win, vars, students):
+        """提交考勤记录"""
+        # 获取选中的学生
+        present_students = [name for name, var in vars.items() if var.get()]
+        
+        if not present_students:
+            ms.showwarning("警告", "请至少选择一名学生")
+            return
+        
+        # 记录考勤
+        scores = self.system.record_attendance(session, present_students)
+        
+        # 显示结果
+        result_text = f"{session_name}考勤已记录:\n"
+        for name in present_students:
+            streak = self.system.load_student_data(session)[name].get_current_streak()
+            result_text += f"{name}: 连续出勤{streak}天\n"
+        
+        # 显示分数摘要
+        result_text += "\n分数统计:\n"
+        for name in students:
+            score_3, score_7 = scores[name]
+            if score_3 > 0 or score_7 > 0:
+                result_text += f"{name}: 3天{score_3}分, 7天{score_7}分\n"
+        
+        ms.showinfo("考勤结果", result_text)
+        attendance_win.destroy()
+        
+        # 从窗口字典中移除
+        if session in self.attendance_windows:
+            del self.attendance_windows[session]
+    
+    def start_auto_submit_timer(self, session, session_name, attendance_win, vars, students):
+        """启动自动提交定时器"""
+        # 计算目标时间
+        now = datetime.now()
+        
+        if session == "morning":
+            target_time = now.replace(hour=7, minute=5, second=0, microsecond=0)
+        else:  # afternoon
+            target_time = now.replace(hour=13, minute=5, second=0, microsecond=0)
+        
+        # 如果目标时间已经过去，则设置为明天的同一时间
+        if target_time < now:
+            target_time += timedelta(days=1)
+        
+        # 计算等待时间（秒）
+        wait_seconds = (target_time - now).total_seconds()
+        
+        # 创建定时器线程
+        timer_thread = threading.Timer(wait_seconds, self.auto_submit, 
+                                      [session, session_name, attendance_win, vars, students])
+        timer_thread.daemon = True
+        timer_thread.start()
+        
+        # 更新窗口标题显示自动提交时间
+        time_str = target_time.strftime("%H:%M")
+        attendance_win.title(f"{session_name}考勤 - 自动提交时间: {time_str}")
+        
+        # 添加倒计时标签
+        countdown_label = tk.Label(attendance_win, text=f"自动提交倒计时: {int(wait_seconds//60)}分钟", 
+                                  font=font_chinese, fg="blue")
+        countdown_label.pack(pady=5)
+        
+        # 启动倒计时更新
+        self.update_countdown(countdown_label, wait_seconds, session, session_name, 
+                             attendance_win, vars, students)
+    
+    def update_countdown(self, label, remaining_seconds, session, session_name, 
+                        attendance_win, vars, students):
+        """更新倒计时显示"""
+        if remaining_seconds > 0 and attendance_win.winfo_exists():
+            minutes = int(remaining_seconds // 60)
+            seconds = int(remaining_seconds % 60)
+            label.config(text=f"自动提交倒计时: {minutes}分{seconds}秒")
+            # 1秒后再次更新
+            attendance_win.after(1000, self.update_countdown, label, remaining_seconds-1, 
+                               session, session_name, attendance_win, vars, students)
+    
+    def auto_submit(self, session, session_name, attendance_win, vars, students):
+        """自动提交考勤"""
+        if attendance_win.winfo_exists():
+            # 在主线程中执行提交
+            attendance_win.after(0, self.submit_attendance, session, session_name, 
+                               attendance_win, vars, students)
+    
     def take_attendance(self, session, session_name):
         """执行考勤记录"""
         # 创建考勤窗口
         attendance_win = tk.Toplevel(self.win)
         attendance_win.title(f"{session_name}考勤")
+        
+        # 存储窗口引用
+        self.attendance_windows[session] = attendance_win
         
         # 获取学生列表和显示设置
         students = self.system.setting['namelist']
@@ -357,35 +449,13 @@ class AttendanceGUI:
         button_frame = tk.Frame(main_frame)
         button_frame.pack(pady=10)
         
-        def submit():
-            # 获取选中的学生
-            present_students = [name for name, var in vars.items() if var.get()]
-            
-            if not present_students:
-                ms.showwarning("警告", "请至少选择一名学生")
-                return
-            
-            # 记录考勤
-            scores = self.system.record_attendance(session, present_students)
-            
-            # 显示结果
-            result_text = f"{session_name}考勤已记录:\n"
-            for name in present_students:
-                streak = self.system.load_student_data(session)[name].get_current_streak()
-                result_text += f"{name}: 连续出勤{streak}天\n"
-            
-            # 显示分数摘要
-            result_text += "\n分数统计:\n"
-            for name in students:
-                score_3, score_7 = scores[name]
-                if score_3 > 0 or score_7 > 0:
-                    result_text += f"{name}: 3天{score_3}分, 7天{score_7}分\n"
-            
-            ms.showinfo("考勤结果", result_text)
-            attendance_win.destroy()
+        # 手动提交按钮
+        tk.Button(button_frame, text="立即提交", 
+                 command=lambda: self.submit_attendance(session, session_name, attendance_win, vars, students),
+                 bg='lightgreen', width=15, font=font_chinese).pack(side='left', padx=5)
         
-        tk.Button(main_frame, text="提交", command=submit, 
-                 bg='lightgreen', width=15, font=font_chinese).pack(pady=10)
+        # 启动自动提交定时器
+        self.start_auto_submit_timer(session, session_name, attendance_win, vars, students)
         
         # 自动调整窗口大小
         attendance_win.update()
