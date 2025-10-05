@@ -274,6 +274,56 @@ class AttendanceSystem:
         self.reset_all_data()
         
         return report_file
+    
+    def load_breakpoint(self, session):
+        """加载断点数据"""
+        breakpoint_file = self.cwd/'eggs/breakpoint.json'
+        
+        if breakpoint_file.exists():
+            with open(breakpoint_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            # 返回指定session的暂存数据
+            return data.get(session, [])
+        else:
+            return []
+    
+    def save_breakpoint(self, session, present_students):
+        """保存断点数据"""
+        breakpoint_file = self.cwd/'eggs/breakpoint.json'
+        
+        # 加载现有的断点数据
+        if breakpoint_file.exists():
+            with open(breakpoint_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        else:
+            data = {}
+        
+        # 更新指定session的暂存数据
+        data[session] = present_students
+        
+        # 保存更新后的数据
+        with open(breakpoint_file, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    
+    def clear_breakpoint(self, session):
+        """清除指定session的断点数据"""
+        breakpoint_file = self.cwd/'eggs/breakpoint.json'
+        
+        if breakpoint_file.exists():
+            with open(breakpoint_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            # 移除指定session的数据
+            if session in data:
+                del data[session]
+            
+            # 如果还有其他session的数据，保存；否则删除文件
+            if data:
+                with open(breakpoint_file, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+            else:
+                breakpoint_file.unlink()
 
 class AttendanceGUI:
     """考勤系统GUI"""
@@ -322,37 +372,68 @@ class AttendanceGUI:
         except Exception as e:
             ms.showerror("错误", f"生成报告时出错:\n{str(e)}")
     
-    def submit_attendance(self, session, session_name, attendance_win, vars, students):
+    def submit_attendance(self, session, session_name, attendance_win, vars, students_list):
         """提交考勤记录"""
-        # 获取选中的学生
-        present_students = [name for name, var in vars.items() if var.get()]
-        
-        if not present_students:
-            ms.showwarning("警告", "请至少选择一名学生")
-            return
-        
-        # 记录考勤
-        scores = self.system.record_attendance(session, present_students)
-        
-        # 显示结果
-        result_text = f"{session_name}考勤已记录:\n"
-        for name in present_students:
-            streak = self.system.load_student_data(session)[name].get_current_streak()
-            result_text += f"{name}: 连续出勤{streak}天\n"
-        
-        # 显示分数摘要
-        result_text += "\n分数统计:\n"
-        for name in students:
-            score_3, score_7 = scores[name]
-            if score_3 > 0 or score_7 > 0:
-                result_text += f"{name}: 3天{score_3}分, 7天{score_7}分\n"
-        
-        ms.showinfo("考勤结果", result_text)
-        attendance_win.destroy()
-        
-        # 从窗口字典中移除
-        if session in self.attendance_windows:
-            del self.attendance_windows[session]
+        try:
+            # 获取选中的学生
+            present_students = [name for name, var in vars.items() if var.get()]
+            
+            if not present_students:
+                ms.showwarning("警告", "请至少选择一名学生")
+                return
+            
+            # 记录考勤
+            scores = self.system.record_attendance(session, present_students)
+            
+            # 清除断点数据
+            self.system.clear_breakpoint(session)
+            
+            # 加载学生数据用于显示
+            students_data = self.system.load_student_data(session)
+            
+            # 显示结果
+            result_text = f"{session_name}考勤已记录:\n"
+            for name in present_students:
+                # 安全检查：确保学生存在于数据中
+                if name in students_data:
+                    streak = students_data[name].get_current_streak()
+                    result_text += f"{name}: 连续出勤{streak}天\n"
+                else:
+                    result_text += f"{name}: 数据不存在\n"
+            
+            # 显示分数摘要
+            result_text += "\n分数统计:\n"
+            for name in students_list:
+                if name in scores:
+                    score_3, score_7 = scores[name]
+                    if score_3 > 0 or score_7 > 0:
+                        result_text += f"{name}: 3天{score_3}分, 7天{score_7}分\n"
+            
+            ms.showinfo("考勤结果", result_text)
+            attendance_win.destroy()
+            
+            # 从窗口字典中移除
+            if session in self.attendance_windows:
+                del self.attendance_windows[session]
+                
+        except KeyError as e:
+            ms.showerror("数据错误", f"学生数据不完整: {str(e)}\n请检查设置文件中的学生名单。")
+        except Exception as e:
+            ms.showerror("错误", f"提交考勤时出错:\n{str(e)}")
+    
+    def save_breakpoint_data(self, session, session_name, vars):
+        """保存断点数据（暂存）"""
+        try:
+            # 获取选中的学生
+            present_students = [name for name, var in vars.items() if var.get()]
+            
+            # 保存到断点文件
+            self.system.save_breakpoint(session, present_students)
+            
+            ms.showinfo("暂存成功", f"{session_name}考勤数据已暂存，下次打开时会自动恢复。")
+            
+        except Exception as e:
+            ms.showerror("错误", f"暂存数据时出错:\n{str(e)}")
     
     def start_auto_submit_timer(self, session, session_name, attendance_win, vars, students):
         """启动自动提交定时器"""
@@ -446,13 +527,24 @@ class AttendanceGUI:
             cb.grid(row=row, column=col, sticky='w', padx=5, pady=2)
             checkbuttons.append(cb)
         
+        # 加载断点数据并恢复选中状态
+        breakpoint_students = self.system.load_breakpoint(session)
+        for name in breakpoint_students:
+            if name in vars:
+                vars[name].set(True)
+        
         button_frame = tk.Frame(main_frame)
         button_frame.pack(pady=10)
+        
+        # 暂存按钮
+        tk.Button(button_frame, text="暂存", 
+                 command=lambda: self.save_breakpoint_data(session, session_name, vars),
+                 bg='lightyellow', width=10, font=font_chinese).pack(side='left', padx=5)
         
         # 手动提交按钮
         tk.Button(button_frame, text="立即提交", 
                  command=lambda: self.submit_attendance(session, session_name, attendance_win, vars, students),
-                 bg='lightgreen', width=15, font=font_chinese).pack(side='left', padx=5)
+                 bg='lightgreen', width=10, font=font_chinese).pack(side='left', padx=5)
         
         # 启动自动提交定时器
         self.start_auto_submit_timer(session, session_name, attendance_win, vars, students)
