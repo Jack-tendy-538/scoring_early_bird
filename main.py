@@ -6,8 +6,6 @@ import time
 from pathlib import Path
 from datetime import datetime, timedelta
 
-font_chinese = ('Microsoft YaHei', 10)
-
 class ContinuousScoring:
     """连续考勤评分系统，替代生成器的可序列化类"""
     
@@ -95,6 +93,11 @@ class AttendanceSystem:
         self.cwd = Path.cwd()
         self.setup_directories()
         self.setting = self.load_settings()
+        # 设置字体
+        self.font_chinese = (
+            self.setting.get('display', {}).get('win', {}).get('font', 'Microsoft YaHei UI'),
+            self.setting.get('display', {}).get('win', {}).get('font_size', 10)
+        )
     
     def setup_directories(self):
         """创建必要的目录"""
@@ -110,17 +113,29 @@ class AttendanceSystem:
         settings_file = self.cwd/'bacon/Setting.yml'
     
         if not settings_file.exists():
-        # 创建默认设置
+            # 创建默认设置
             default_settings = {
-            'points': {
-                '_3_days': 1,
-                '_7_days': 3
-            },
-            'namelist': ['学生1', '学生2', '学生3', '学生4', '学生5', '学生6', '学生7', 
-                       '学生8', '学生9', '学生10', '学生11', '学生12', '学生13', '学生14'],
-            'display': {
-                'columns_per_row': 7  # 每行显示的复选框数量
-            }
+                'points': {
+                    '_3_days': 1,
+                    '_7_days': 3
+                },
+                'timer': {
+                    'on': True,
+                    'morning': '7:05',
+                    'afternoon': '13:05'
+                },
+                'display': {
+                    'win': {
+                        'row_num': 7,
+                        'font': 'Microsoft YaHei UI',
+                        'font_size': 10
+                    },
+                    'md': {
+                        'column_num': 12
+                    }
+                },
+                'namelist': ['学生1', '学生2', '学生3', '学生4', '学生5', '学生6', '学生7', 
+                           '学生8', '学生9', '学生10', '学生11', '学生12', '学生13', '学生14']
             }
             # 将默认设置写入文件
             with open(settings_file, 'w', encoding='utf-8') as fp:
@@ -137,7 +152,7 @@ class AttendanceSystem:
                 except (UnicodeDecodeError, yaml.YAMLError):
                     continue
         
-        # 如果所有编码都失败，使用错误处理方式读取
+            # 如果所有编码都失败，使用错误处理方式读取
             with open(settings_file, 'r', encoding='utf-8', errors='replace') as fp:
                 return yaml.safe_load(fp)
     
@@ -339,6 +354,9 @@ class AttendanceGUI:
         self.win.title("考勤系统")
         self.win.geometry("300x250")
         
+        # 使用设置中的字体
+        font_chinese = self.system.font_chinese
+        
         tk.Label(self.win, text='请选择一个操作', font=font_chinese).pack(pady=10)
         tk.Button(self.win, text='上午考勤', command=self.append_morning, 
                  width=15, height=2, font=font_chinese).pack(pady=5)
@@ -435,15 +453,36 @@ class AttendanceGUI:
         except Exception as e:
             ms.showerror("错误", f"暂存数据时出错:\n{str(e)}")
     
+    def parse_time_string(self, time_str):
+        """解析时间字符串，返回小时和分钟"""
+        try:
+            time_parts = time_str.split(':')
+            hour = int(time_parts[0])
+            minute = int(time_parts[1])
+            return hour, minute
+        except (ValueError, IndexError):
+            # 如果解析失败，返回默认值
+            return 7, 5 if "morning" in time_str else 13, 5
+    
     def start_auto_submit_timer(self, session, session_name, attendance_win, vars, students):
         """启动自动提交定时器"""
+        # 检查是否启用定时器
+        timer_enabled = self.system.setting.get('timer', {}).get('on', True)
+        if not timer_enabled:
+            return
+        
         # 计算目标时间
         now = datetime.now()
         
+        # 从设置中获取时间
         if session == "morning":
-            target_time = now.replace(hour=7, minute=5, second=0, microsecond=0)
+            time_str = self.system.setting.get('timer', {}).get('morning', '7:05')
         else:  # afternoon
-            target_time = now.replace(hour=13, minute=5, second=0, microsecond=0)
+            time_str = self.system.setting.get('timer', {}).get('afternoon', '13:05')
+        
+        # 解析时间字符串
+        hour, minute = self.parse_time_string(time_str)
+        target_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
         
         # 如果目标时间已经过去，则设置为明天的同一时间
         if target_time < now:
@@ -459,12 +498,12 @@ class AttendanceGUI:
         timer_thread.start()
         
         # 更新窗口标题显示自动提交时间
-        time_str = target_time.strftime("%H:%M")
-        attendance_win.title(f"{session_name}考勤 - 自动提交时间: {time_str}")
+        time_str_display = target_time.strftime("%H:%M")
+        attendance_win.title(f"{session_name}考勤 - 自动提交时间: {time_str_display}")
         
         # 添加倒计时标签
         countdown_label = tk.Label(attendance_win, text=f"自动提交倒计时: {int(wait_seconds//60)}分钟", 
-                                  font=font_chinese, fg="blue")
+                                  font=self.system.font_chinese, fg="blue")
         countdown_label.pack(pady=5)
         
         # 启动倒计时更新
@@ -500,7 +539,7 @@ class AttendanceGUI:
         
         # 获取学生列表和显示设置
         students = self.system.setting['namelist']
-        columns_per_row = self.system.setting.get('display', {}).get('columns_per_row', 7)
+        columns_per_row = self.system.setting.get('display', {}).get('win', {}).get('row_num', 7)
         
         # 创建主框架
         main_frame = tk.Frame(attendance_win)
@@ -508,7 +547,7 @@ class AttendanceGUI:
         
         # 标题
         tk.Label(main_frame, text=f"请{session_name}早到的同学自己上来打勾:", 
-                font=font_chinese).pack(pady=(0, 10))
+                font=self.system.font_chinese).pack(pady=(0, 10))
         
         # 创建复选框容器
         checkboxes_frame = tk.Frame(main_frame)
@@ -523,7 +562,7 @@ class AttendanceGUI:
             col = i % columns_per_row
             
             vars[name] = tk.BooleanVar()
-            cb = tk.Checkbutton(checkboxes_frame, text=name, variable=vars[name], font=font_chinese)
+            cb = tk.Checkbutton(checkboxes_frame, text=name, variable=vars[name], font=self.system.font_chinese)
             cb.grid(row=row, column=col, sticky='w', padx=5, pady=2)
             checkbuttons.append(cb)
         
@@ -539,12 +578,12 @@ class AttendanceGUI:
         # 暂存按钮
         tk.Button(button_frame, text="暂存", 
                  command=lambda: self.save_breakpoint_data(session, session_name, vars),
-                 bg='lightyellow', width=10, font=font_chinese).pack(side='left', padx=5)
+                 bg='lightyellow', width=10, font=self.system.font_chinese).pack(side='left', padx=5)
         
         # 手动提交按钮
         tk.Button(button_frame, text="立即提交", 
                  command=lambda: self.submit_attendance(session, session_name, attendance_win, vars, students),
-                 bg='lightgreen', width=10, font=font_chinese).pack(side='left', padx=5)
+                 bg='lightgreen', width=10, font=self.system.font_chinese).pack(side='left', padx=5)
         
         # 启动自动提交定时器
         self.start_auto_submit_timer(session, session_name, attendance_win, vars, students)
