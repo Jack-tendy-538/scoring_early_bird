@@ -1,8 +1,26 @@
+points:
+  _3_days: 1
+  _7_days: 2.5
+timer:
+  on: true
+  morning: "7:05"
+  afternoon: "14:00"
+display:
+  # 这将改变窗口的显示
+  win:
+    row_num: 7
+    font: "Microsoft YaHei UI"
+    font_size: 10
+  # 这将改变输出md文件的排版
+  md:
+    column_num: 12
 namelist:
 - sweet
 - sleepy
 - stupid
 - sexy
-points:
-  _3_days: 1
-  _7_days: 3
+# 与项目有关的设置，与代码无关
+project:
+  url: "https://github.com/Jack-tendy-538/score_early_bird"   
+  license: "MIT License"
+  version: "1.0.0.3"
