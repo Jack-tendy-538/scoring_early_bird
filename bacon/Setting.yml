@@ -6,12 +6,12 @@ timer:
   morning: "7:05"
   afternoon: "14:00"
 display:
-  # Õâ½«¸Ä±ä´°¿ÚµÄÏÔÊ¾
+  # è¿™å°†æ”¹å˜çª—å£çš„æ˜¾ç¤º
   win:
     row_num: 7
     font: "Microsoft YaHei UI"
     font_size: 10
-  # Õâ½«¸Ä±äÊä³ömdÎÄ¼şµÄÅÅ°æ
+  # è¿™å°†æ”¹å˜è¾“å‡ºmdæ–‡ä»¶çš„æ’ç‰ˆ
   md:
     column_num: 12
 namelist:
@@ -19,8 +19,8 @@ namelist:
 - sleepy
 - stupid
 - sexy
-# ÓëÏîÄ¿ÓĞ¹ØµÄÉèÖÃ£¬Óë´úÂëÎŞ¹Ø
+# ä¸é¡¹ç›®æœ‰å…³çš„è®¾ç½®ï¼Œä¸ä»£ç æ— å…³
 project:
-  url: "https://github.com/Jack-tendy-538/score_early_bird"   
+  url: "https://github.com/Jack-tendy-538/scoring_early_bird"   
   license: "MIT License"
   version: "1.0.0.3"
